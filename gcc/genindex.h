@@ -28,6 +28,10 @@ int read_indexed_header_list             PARAMS ((void));
 void write_indexed_header_list           PARAMS ((void));
 struct indexed_header * add_index_header_name PARAMS ((char *));
 struct indexed_header * add_index_header PARAMS ((char *, time_t));
+void push_cur_index_filename             PARAMS ((char *));
+void pop_cur_index_filename              PARAMS ((void));
+void add_dup_header_name                 PARAMS ((char *, char *));
+
 void free_indexed_header_list            PARAMS ((void));
 int process_header_indexing              PARAMS ((char *, int));
 /* Update header status.  */
@@ -70,6 +74,7 @@ enum index_info {
   INDEX_ENUM,                   /* +vm */
   INDEX_FILE_BEGIN,             /* +Fm */
   INDEX_FILE_END,               /* -Fm */
+  INDEX_FILE_INCLUDE,		/* +Fi */
   INDEX_FUNCTION_BEGIN,         /* +fm */
   INDEX_FUNCTION_END,           /* -fm */
   INDEX_FUNCTION_DECL,          /* +fh */

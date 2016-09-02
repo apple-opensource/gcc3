@@ -163,23 +163,15 @@ static int dbxout_nesting = 0;
 #define DBXOUT_DECR_NESTING_AND_RETURN(x) \
   do {--dbxout_nesting; return (x);} while (0)
 
-/* These macros are used to control the nested calls to dbxout_save_arguments().
-   There is a different macro to cover 0, 1, and 2 argument calls.  */
+/* This macro is used to control the nested calls to 
+   dbxout_save_arguments(). */
    
-#define DBXOUT_SAVE_ARGUMENTS_0(code) 		\
+#define DBXOUT_SAVE_ARGUMENTS(code...) 		\
   if (pfe_operation == PFE_DUMP) 		\
     dbxout_save_arguments (code);
     
-#define DBXOUT_SAVE_ARGUMENTS_1(code, arg1) 	\
-  if (pfe_operation == PFE_DUMP) 		\
-    dbxout_save_arguments (code, arg1);
-
-#define DBXOUT_SAVE_ARGUMENTS_2(code, arg1, arg2) \
-  if (pfe_operation == PFE_DUMP) 		\
-    dbxout_save_arguments (code, arg1, arg2);	\
-
 /* Layout of a dbxout_data_array entry.  Each entry variant depends on
-   it's dbxout_code.  */
+   its dbxout_code.  */
 struct dbxout_stabs_t {
   ENUM_BITFIELD(dbxout_code) code;
   
@@ -219,7 +211,7 @@ struct dbxout_stabs_t {
   } u;
 };
 
-/* Here's dbxout_data_array and data controlling it's growth.  */
+/* Here's dbxout_data_array and data controlling its growth.  */
 static struct dbxout_stabs_t *dbxout_data_array = NULL;
 #define DBXOUT_DATA_ARRAY_INITIAL_SIZE 40000
 #define DBXOUT_DATA_ARRAY_INCR         10000
@@ -228,7 +220,6 @@ static int dbxout_data_array_next = 0;
 static int dbxout_data_array_incr = DBXOUT_DATA_ARRAY_INITIAL_SIZE;
 
 static void freeze_thaw_dbxout_data_array PARAMS ((struct dbxout_stabs_t **));
-static void dbxout_generate_loaded_stabs  PARAMS ((void));
 static void dbxout_save_arguments   	  PARAMS ((enum dbxout_code code, ...));
 
 static void dbxout_intercept_init PARAMS ((const char *main_filename));
@@ -252,7 +243,7 @@ static void dbxout_intercept_deferred_inline_function PARAMS ((union tree_node *
 static void dbxout_intercept_outlining_inline_function PARAMS ((union tree_node *decl));
 static void dbxout_intercept_label PARAMS ((struct rtx_def *insn));
 
-static struct gcc_debug_hooks intercept_debug_hooks =
+struct gcc_debug_hooks intercept_debug_hooks =
 {
   dbxout_intercept_init,
   dbxout_intercept_finish,
@@ -276,7 +267,7 @@ static struct gcc_debug_hooks intercept_debug_hooks =
   dbxout_intercept_label
 };
 
-static struct gcc_debug_hooks *actual_debug_hooks;
+struct gcc_debug_hooks *actual_debug_hooks;
 #endif /* PFE */
 
 /* APPLE LOCAL begin gdb only used symbols */
@@ -294,9 +285,7 @@ static int  symbol_queue_size = 0;
 #ifndef PFE
 #define DBXOUT_TRACK_NESTING
 static int dbxout_nesting = 0;
-#define DBXOUT_SAVE_ARGUMENTS_0(code)
-#define DBXOUT_SAVE_ARGUMENTS_1(code, arg1)
-#define DBXOUT_SAVE_ARGUMENTS_2(code, arg1, arg2)
+#define DBXOUT_SAVE_ARGUMENTS(code...)
 #endif
 
 /* The DBXOUT_DECR_... macros together with DBXOUT_TRACK_NESTING are
@@ -666,7 +655,9 @@ dbxout_init (input_file_name)
 #else /* no DBX_OUTPUT_MAIN_SOURCE_DIRECTORY */
 	  fprintf (asmfile, "%s", ASM_STABS_OP);
 	  output_quoted_string (asmfile, cwd);
-	  fprintf (asmfile, ",%d,0,0,%s\n", N_SO, &ltext_label_name[1]);
+	  fprintf (asmfile, ",%d,0,0,", N_SO);
+	  assemble_name (asmfile, ltext_label_name);
+	  fputc ('\n', asmfile);
 #endif /* no DBX_OUTPUT_MAIN_SOURCE_DIRECTORY */
 	}
     }
@@ -681,8 +672,9 @@ dbxout_init (input_file_name)
   /* Used to put `Ltext:' before the reference, but that loses on sun 4.  */
   fprintf (asmfile, "%s", ASM_STABS_OP);
   output_quoted_string (asmfile, input_file_name);
-  fprintf (asmfile, ",%d,0,0,%s\n", 
-	   N_SO, &ltext_label_name[1]);
+  fprintf (asmfile, ",%d,0,0,", N_SO);
+  assemble_name (asmfile, ltext_label_name);
+  fputc ('\n', asmfile);
   text_section ();
   ASM_OUTPUT_INTERNAL_LABEL (asmfile, "Ltext", 0);
 #endif /* no DBX_OUTPUT_MAIN_SOURCE_FILENAME */
@@ -727,11 +719,6 @@ dbxout_init (input_file_name)
      when loading.  */
   if (pfe_operation != PFE_LOAD)
     {
-      if (pfe_operation == PFE_DUMP)
-        {
-	  actual_debug_hooks = debug_hooks;
-	  debug_hooks        = &intercept_debug_hooks;
-	}
 
 #ifdef DBX_OUTPUT_STANDARD_TYPES
       DBX_OUTPUT_STANDARD_TYPES (syms);
@@ -747,10 +734,6 @@ dbxout_init (input_file_name)
 	 and output them all, except for those already output.  */
     
       dbxout_typedefs (syms);
-    }
-  else if (debug_hooks != &do_nothing_debug_hooks)
-    {
-      dbxout_generate_loaded_stabs ();
     }
     
 #else /* !PFE */
@@ -846,7 +829,9 @@ dbxout_source_file (file, filename)
 				   source_label_number);
       fprintf (file, "%s", ASM_STABS_OP);
       output_quoted_string (file, filename);
-      fprintf (file, ",%d,0,0,%s\n", N_SOL, &ltext_label_name[1]);
+      fprintf (asmfile, ",%d,0,0,", N_SOL);
+      assemble_name (asmfile, ltext_label_name);
+      fputc ('\n', asmfile);
       if (current_function_decl != NULL_TREE
 	  && DECL_SECTION_NAME (current_function_decl) != NULL_TREE)
 	; /* Don't change section amid function.  */
@@ -1385,10 +1370,13 @@ dbxout_type (type, full)
      int full;
 {
   tree tem;
+  tree main_variant;
   static int anonymous_type_number = 0;
 
   if (TREE_CODE (type) == VECTOR_TYPE)
-    type = TYPE_DEBUG_REPRESENTATION_TYPE (type);
+      /* The frontend feeds us a representation for the vector as a struct
+	 containing an array.  Pull out the array type.  */
+    type = TREE_TYPE (TYPE_FIELDS (TYPE_DEBUG_REPRESENTATION_TYPE (type)));
 
   /* If there was an input error and we don't really have a type,
      avoid crashing and write something that is at least valid
@@ -1397,23 +1385,23 @@ dbxout_type (type, full)
     type = integer_type_node;
   else
     {
-      /* Try to find the "main variant" with the same name but not const
-	 or volatile.  (Since stabs does not distinguish const and volatile,
-	 there is no need to make them separate types.  But types with
-	 different names are usefully distinguished.) */
-	 
-      for (tem = TYPE_MAIN_VARIANT (type); tem; tem = TYPE_NEXT_VARIANT (tem))
-	if (!TYPE_READONLY (tem) && !TYPE_VOLATILE (tem)
-	    && TYPE_NAME (tem) == TYPE_NAME (type))
-	  {
-	    type = tem;
-	    break;
-	  }
       if (TYPE_NAME (type)
 	  && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
 	  && TYPE_DECL_SUPPRESS_DEBUG (TYPE_NAME (type)))
 	full = 0;
     }
+
+  /* Try to find the "main variant" with the same name.  */
+  if (TYPE_NAME (type) && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
+      && DECL_ORIGINAL_TYPE (TYPE_NAME (type)))
+    main_variant = TREE_TYPE (TYPE_NAME (type));
+  else
+    main_variant = TYPE_MAIN_VARIANT (type);
+
+  /* If we are not using extensions, stabs does not distinguish const and
+     volatile, so there is no need to make them separate types.  */
+  if (!use_gnu_debug_info_extensions)
+    type = main_variant;
 
   if (TYPE_SYMTAB_ADDRESS (type) == 0)
     {
@@ -1448,7 +1436,8 @@ dbxout_type (type, full)
 	       || TREE_CODE (type) == QUAL_UNION_TYPE
 	       || TREE_CODE (type) == ENUMERAL_TYPE)
 	      && TYPE_STUB_DECL (type)
-	      && TREE_CODE_CLASS (TREE_CODE (TYPE_STUB_DECL (type))) == 'd')
+	      && TREE_CODE_CLASS (TREE_CODE (TYPE_STUB_DECL (type))) == 'd'
+	      && ! DECL_IGNORED_P (TYPE_STUB_DECL (type)))
 	    dbxout_queue_symbol (TYPE_STUB_DECL (type));
 	  else if (TYPE_NAME (type)
 	    	   && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL)
@@ -1521,10 +1510,26 @@ dbxout_type (type, full)
 
   typevec[TYPE_SYMTAB_ADDRESS (type)].status = TYPE_DEFINED;
 
-  if (TYPE_NAME (type) && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
-      && DECL_ORIGINAL_TYPE (TYPE_NAME (type)))
-    { 
-/* APPLE LOCAL gdb only used symbols */
+  /* If this type is a variant of some other, hand off.  Types with
+     different names are usefully distinguished.  We only distinguish
+     cv-qualified types if we're using extensions.  */
+  if (TYPE_READONLY (type) > TYPE_READONLY (main_variant))
+    {
+      putc ('k', asmfile);
+      CHARS (1);
+      dbxout_type (build_type_variant (type, 0, TYPE_VOLATILE (type)), 0);
+      return;
+    }
+  else if (TYPE_VOLATILE (type) > TYPE_VOLATILE (main_variant))
+    {
+      putc ('B', asmfile);
+      CHARS (1);
+      dbxout_type (build_type_variant (type, TYPE_READONLY (type), 0), 0);
+      return;
+    }
+  else if (main_variant != TYPE_MAIN_VARIANT (type))
+    {
+      /* APPLE LOCAL begin gdb only used symbols */
 #ifdef DBX_ONLY_USED_SYMBOLS
       if (flag_debug_only_used_symbols)
         {
@@ -1534,13 +1539,17 @@ dbxout_type (type, full)
 	       || TREE_CODE (orig_type) == UNION_TYPE
 	       || TREE_CODE (orig_type) == QUAL_UNION_TYPE
 	       || TREE_CODE (orig_type) == ENUMERAL_TYPE)
-	      && TYPE_STUB_DECL (orig_type))
+	      && TYPE_STUB_DECL (orig_type)
+	      && ! DECL_IGNORED_P (TYPE_STUB_DECL (orig_type)))
 	    dbxout_queue_symbol (TYPE_STUB_DECL (orig_type));
       	}
 #endif
+      /* APPLE LOCAL end gdb only used symbols */
+      /* 'type' is a typedef; output the type it refers to.  */
       dbxout_type (DECL_ORIGINAL_TYPE (TYPE_NAME (type)), 0);
       return;
     }
+  /* else continue.  */
 
   switch (TREE_CODE (type))
     {
@@ -2188,7 +2197,9 @@ dbxout_symbol (decl, local)
 #ifdef DBXOUT_TRACK_NESTING
   /* "Intercept" dbxout_symbol() calls like we do all debug_hooks.  */
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_SYMBOL, decl, local);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_SYMBOL, decl, local);
+  if (pfe_operation == PFE_DUMP)
+    DBXOUT_DECR_NESTING_AND_RETURN (0);
 #endif
     
   /* Cast avoids warning in old compilers.  */
@@ -2229,18 +2240,31 @@ dbxout_symbol (decl, local)
       t = type;
       while (POINTER_TYPE_P (t))
         t = TREE_TYPE (t);
-
+      
+      /* RECORD_TYPE, UNION_TYPE, QUAL_UNION_TYPE, and ENUMERAL_TYPE
+         need special treatment.  The TYPE_STUB_DECL field in these
+         types generally represents the tag name type we want to
+         output.  In addition there  could be a typedef type with
+         a different name.  In that case we also want to output
+         that.  */
+         
       if ((TREE_CODE (t) == RECORD_TYPE
 	   || TREE_CODE (t) == UNION_TYPE
 	   || TREE_CODE (t) == QUAL_UNION_TYPE
 	   || TREE_CODE (t) == ENUMERAL_TYPE)
 	  && TYPE_STUB_DECL (t)
 	  && TYPE_STUB_DECL (t) != decl
-	  //&& !TREE_ASM_WRITTEN (TYPE_STUB_DECL (t))
-	  && TREE_CODE_CLASS (TREE_CODE (TYPE_STUB_DECL (t))) == 'd')
-	dbxout_queue_symbol (TYPE_STUB_DECL (t));
+	  && TREE_CODE_CLASS (TREE_CODE (TYPE_STUB_DECL (t))) == 'd'
+	  && ! DECL_IGNORED_P (TYPE_STUB_DECL (t)))
+	{
+	  dbxout_queue_symbol (TYPE_STUB_DECL (t));
+	  if (TYPE_NAME (t)
+	      && TYPE_NAME (t) != TYPE_STUB_DECL (t)
+	      && TYPE_NAME (t) != decl
+	      && TREE_CODE_CLASS (TREE_CODE (TYPE_NAME (t))) == 'd')
+	    dbxout_queue_symbol (TYPE_NAME (t));
+	}
       else if (TYPE_NAME (t)
-	  //&& !TREE_ASM_WRITTEN (t)
 	  && TYPE_NAME (t) != decl
 	  && TREE_CODE_CLASS (TREE_CODE (TYPE_NAME (t))) == 'd')
 	dbxout_queue_symbol (TYPE_NAME (t));
@@ -2609,6 +2633,21 @@ dbxout_symbol_location (decl, type, suffix, home)
 	    current_sym_code = DBX_STATIC_CONST_VAR_CODE;
 	  else
 	    {
+	      /* Some ports can transform a symbol ref into a label ref,
+		 because the symbol ref is too far away and has to be
+		 dumped into a constant pool.  Alternatively, the symbol
+		 in the constant pool might be referenced by a different
+		 symbol.  */
+	      if (GET_CODE (current_sym_addr) == SYMBOL_REF
+		  && CONSTANT_POOL_ADDRESS_P (current_sym_addr))
+		{
+		  rtx tmp = get_pool_constant (current_sym_addr);
+
+		  if (GET_CODE (tmp) == SYMBOL_REF
+		      || GET_CODE (tmp) == LABEL_REF)
+		    current_sym_addr = tmp;
+		}
+  
 	      /* Ultrix `as' seems to need this.  */
 #ifdef DBX_STATIC_STAB_DATA_SECTION
 	      data_section ();
@@ -2848,7 +2887,7 @@ dbxout_parms (parms)
 /* APPLE LOCAL PFE and gdb only used symbols */
 #ifdef DBXOUT_TRACK_NESTING
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_PARMS, parms);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_PARMS, parms);
 #endif
 
   for (; parms; parms = TREE_CHAIN (parms))
@@ -3040,9 +3079,14 @@ dbxout_parms (parms)
 	      current_sym_value
 	        = INTVAL (XEXP (XEXP (XEXP (DECL_RTL (parms), 0), 0), 1));
 	    current_sym_addr = 0;
+	    current_sym_code = N_PSYM;
 	      
 	    FORCE_TEXT;
 	    fprintf (asmfile, "%s\"%s:v", ASM_STABS_OP, decl_name);
+
+	    current_sym_value
+	      = DEBUGGER_ARG_OFFSET (current_sym_value,
+				     XEXP (XEXP (DECL_RTL (parms), 0), 0));
 	    dbxout_type (TREE_TYPE (parms), 0);
 	    dbxout_finish_symbol (parms);
 	  }
@@ -3126,7 +3170,7 @@ dbxout_reg_parms (parms)
 /* APPLE LOCAL PFE and gdb only used symbols */
 #ifdef DBXOUT_TRACK_NESTING
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_REG_PARMS, parms);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_REG_PARMS, parms);
 #endif
 
   for (; parms; parms = TREE_CHAIN (parms))
@@ -3435,7 +3479,7 @@ freeze_thaw_dbxout_data_array (dbxout_data_array_p)
 
 /* Called from dbxout_init() to regenerate the debug info from the
    dbxout_data_array saved in a pfe load file.  */
-static void
+void
 dbxout_generate_loaded_stabs ()
 {
   int i;
@@ -3657,8 +3701,9 @@ dbxout_intercept_init (main_filename)
      const char *main_filename;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_INIT, main_filename);
-  (*actual_debug_hooks->init) (main_filename);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_INIT, main_filename);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->init) (main_filename);
   --dbxout_nesting;
 }
 
@@ -3672,11 +3717,13 @@ dbxout_intercept_finish (main_filename)
 {
 #if 0
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_FINISH, main_filename);
-  (*actual_debug_hooks->finish) (main_filename);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_FINISH, main_filename);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->finish) (main_filename);
   --dbxout_nesting;
 #else
-  (*actual_debug_hooks->finish) (main_filename);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->finish) (main_filename);
 #endif
 }
 
@@ -3686,8 +3733,9 @@ dbxout_intercept_define (line, text)
     const char *text;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_DEFINE, line, text);
-  (*actual_debug_hooks->define) (line, text);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_DEFINE, line, text);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->define) (line, text);
   --dbxout_nesting;
 }
 
@@ -3697,8 +3745,9 @@ dbxout_intercept_undef (line, macro)
     const char *macro;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_UNDEF, line, macro);
-  (*actual_debug_hooks->undef) (line, macro);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_UNDEF, line, macro);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->undef) (line, macro);
   --dbxout_nesting;
 }
 
@@ -3708,8 +3757,9 @@ dbxout_intercept_start_source_file (line, file)
      const char *file;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_START_SOURCE_FILE, line, file);
-  (*actual_debug_hooks->start_source_file) (line, file);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_START_SOURCE_FILE, line, file);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->start_source_file) (line, file);
   --dbxout_nesting;
 }
 
@@ -3718,8 +3768,9 @@ dbxout_intercept_end_source_file (line)
      unsigned int line;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_END_SOURCE_FILE, line);
-  (*actual_debug_hooks->end_source_file) (line);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_END_SOURCE_FILE, line);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->end_source_file) (line);
   --dbxout_nesting;
 }
 
@@ -3729,8 +3780,9 @@ dbxout_intercept_begin_block (line, n)
      unsigned int n;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_BEGIN_BLOCK, line, n);
-  (*actual_debug_hooks->begin_block) (line, n);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_BEGIN_BLOCK, line, n);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->begin_block) (line, n);
   --dbxout_nesting;
 }
 
@@ -3740,8 +3792,9 @@ dbxout_intercept_end_block (line, n)
      unsigned int n;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_END_BLOCK, line, n);
-  (*actual_debug_hooks->end_block) (line, n);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_END_BLOCK, line, n);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->end_block) (line, n);
   --dbxout_nesting;
 }
 
@@ -3749,10 +3802,13 @@ static bool
 dbxout_intercept_ignore_block (node)
      union tree_node *node;
 {
+  bool result = true;
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_IGNORE_BLOCK, node);
-  return (*actual_debug_hooks->ignore_block) (node);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_IGNORE_BLOCK, node);
+  if (pfe_operation != PFE_DUMP)
+    result = (*actual_debug_hooks->ignore_block) (node);
   --dbxout_nesting;
+  return result;
 }
 
 static void
@@ -3761,8 +3817,9 @@ dbxout_intercept_source_line (line, file)
      const char *file;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_SOURCE_LINE, line, file);
-  (*actual_debug_hooks->source_line) (line, file);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_SOURCE_LINE, line, file);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->source_line) (line, file);
   --dbxout_nesting;
 }
 
@@ -3772,8 +3829,9 @@ dbxout_intercept_begin_prologue (line, file)
      const char *file;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_2 (DBXOUT_BEGIN_PROLOGUE, line, file);
-  (*actual_debug_hooks->begin_prologue) (line, file);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_BEGIN_PROLOGUE, line, file);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->begin_prologue) (line, file);
   --dbxout_nesting;
 }
 
@@ -3782,8 +3840,9 @@ dbxout_intercept_end_prologue (line)
      unsigned int line;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_END_PROLOGUE, line);
-  (*actual_debug_hooks->end_prologue) (line);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_END_PROLOGUE, line);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->end_prologue) (line);
   --dbxout_nesting;
 }
 
@@ -3791,8 +3850,9 @@ static void
 dbxout_intercept_end_epilogue ()
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_0 (DBXOUT_END_EPILOGUE);
-  (*actual_debug_hooks->end_epilogue) ();
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_END_EPILOGUE);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->end_epilogue) ();
   --dbxout_nesting;
 }
 
@@ -3801,8 +3861,9 @@ dbxout_intercept_begin_function (decl)
      union tree_node *decl;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_BEGIN_FUNCTION, decl);
-  (*actual_debug_hooks->begin_function) (decl);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_BEGIN_FUNCTION, decl);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->begin_function) (decl);
   --dbxout_nesting;
 }
 
@@ -3811,8 +3872,9 @@ dbxout_intercept_end_function (line)
      unsigned int line;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_END_FUNCTION, line);
-  (*actual_debug_hooks->end_function) (line);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_END_FUNCTION, line);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->end_function) (line);
   --dbxout_nesting;
 }
 
@@ -3821,8 +3883,9 @@ dbxout_intercept_function_decl (decl)
      union tree_node *decl;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_FUNCTION_DECL, decl);
-  (*actual_debug_hooks->function_decl) (decl);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_FUNCTION_DECL, decl);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->function_decl) (decl);
   --dbxout_nesting;
 }
 
@@ -3831,8 +3894,9 @@ dbxout_intercept_global_decl (decl)
      union tree_node *decl;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_GLOBAL_DECL, decl);
-  (*actual_debug_hooks->global_decl) (decl);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_GLOBAL_DECL, decl);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->global_decl) (decl);
   --dbxout_nesting;
 }
 
@@ -3841,8 +3905,9 @@ dbxout_intercept_deferred_inline_function (decl)
      union tree_node *decl;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_DEFERRED_INLINE_FUNCTION, decl);
-  (*actual_debug_hooks->deferred_inline_function) (decl);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_DEFERRED_INLINE_FUNCTION, decl);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->deferred_inline_function) (decl);
   --dbxout_nesting;
 }
 
@@ -3851,8 +3916,9 @@ dbxout_intercept_outlining_inline_function (decl)
      union tree_node *decl;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_OUTLINING_INLINE_FUNCTION, decl);
-  (*actual_debug_hooks->outlining_inline_function) (decl);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_OUTLINING_INLINE_FUNCTION, decl);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->outlining_inline_function) (decl);
   --dbxout_nesting;
 }
 
@@ -3861,8 +3927,9 @@ dbxout_intercept_label (insn)
     struct rtx_def *insn;
 {
   ++dbxout_nesting;
-  DBXOUT_SAVE_ARGUMENTS_1 (DBXOUT_LABEL, insn);
-  (*actual_debug_hooks->label) (insn);
+  DBXOUT_SAVE_ARGUMENTS (DBXOUT_LABEL, insn);
+  if (pfe_operation != PFE_DUMP)
+    (*actual_debug_hooks->label) (insn);
   --dbxout_nesting;
 }
 

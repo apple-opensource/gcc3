@@ -65,7 +65,11 @@ int
 c_disregard_inline_limits (fn)
      tree fn;
 {
-  return DECL_DECLARED_INLINE_P (fn) && DECL_EXTERNAL (fn);
+  if (lookup_attribute ("always_inline", DECL_ATTRIBUTES (fn)) != NULL)
+    return 1;
+
+  /* APPLE LOCAL obey inline */
+  return DECL_DECLARED_INLINE_P (fn) && (DECL_EXTERNAL (fn) || flag_obey_inline);
 }
 
 static tree
@@ -147,6 +151,10 @@ c_cannot_inline_tree_fn (fnp)
 {
   tree fn = *fnp;
   tree t;
+
+  if (flag_really_no_inline
+      && lookup_attribute ("always_inline", DECL_ATTRIBUTES (fn)) == NULL)
+    return 1;
 
   if (! function_attribute_inlinable_p (fn))
     {
@@ -257,6 +265,13 @@ c_objc_common_init (filename)
   VARRAY_TREE_INIT (deferred_fns, 32, PFE_VARRAY "deferred_fns");
   ggc_add_tree_varray_root (&deferred_fns, 1);
 
+/* APPLE LOCAL gdb only used symbols */
+#ifdef DBX_ONLY_USED_SYMBOLS
+  /* By default we want to use -gused for C and Objective-C.  */
+  if (flag_debug_only_used_symbols == -1)
+    flag_debug_only_used_symbols = 1;
+#endif
+
   return filename;
 }
 
@@ -278,6 +293,14 @@ static void
 expand_deferred_fns ()
 {
   unsigned int i;
+
+  /* APPLE LOCAL begin PFE dpatel */
+#ifdef PFE
+  /* We will expand deferred_fns during load.  */
+  if (pfe_operation == PFE_DUMP)
+    return;
+#endif
+  /* APPLE LOCAL end PFE dpatel */
 
   for (i = 0; i < VARRAY_ACTIVE_SIZE (deferred_fns); i++)
     {
@@ -337,7 +360,7 @@ finish_cdtor (body)
 
   RECHAIN_STMTS (body, COMPOUND_BODY (body));
 
-  finish_function (0);
+  finish_function (0, 0);
 }
 
 /* Called at end of parsing, but before end-of-file processing.  */

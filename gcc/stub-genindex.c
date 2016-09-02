@@ -25,6 +25,17 @@ finish_gen_indexing ()
 }
 
 void
+push_cur_index_filename (name)
+     char *name ATTRIBUTE_UNUSED;
+{
+}
+
+void
+pop_cur_index_filename ()
+{
+}
+
+void
 flush_index_buffer ()
 {
 }
@@ -45,3 +56,18 @@ void gen_indexing_header (name)
 void gen_indexing_footer ()
 {
 }
+
+/* APPLE LOCAL begin constant strings */
+int flag_next_runtime = 0;
+const char *constant_string_class_name = 0;
+/* APPLE LOCAL end constant strings */
+
+/* APPLE LOCAL begin constant cfstrings */
+int 
+build_cfstring_ascii (str)
+     int str ATTRIBUTE_UNUSED;
+{
+  return 0;
+}
+/* APPLE LOCAL end constant cfstrings */
+

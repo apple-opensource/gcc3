@@ -47,7 +47,7 @@ Software Foundation, 59 Temple Place - Suite 330, Boston, MA
 /* MULTIBYTE_CHARS support only works for native compilers.
    ??? Ideally what we want is to model widechar support after
    the current floating point support.  */
-  /* APPLE LOCAL  PHAT builds  */
+/* APPLE LOCAL fat builds  */
 #if defined (CROSS_COMPILE) && !defined (PHAT)
 #undef MULTIBYTE_CHARS
 #endif
@@ -91,7 +91,8 @@ static int ignore_escape_flag;
 
 static void parse_float		PARAMS ((PTR));
 static tree lex_number		PARAMS ((const char *, unsigned int));
-static tree lex_string		PARAMS ((const char *, unsigned int, int));
+static tree lex_string		PARAMS ((const unsigned char *, unsigned int,
+					 int));
 static tree lex_charconst	PARAMS ((const cpp_token *));
 static void update_header_times	PARAMS ((const char *));
 static int dump_one_header	PARAMS ((splay_tree_node, void *));
@@ -156,13 +157,32 @@ init_c_lex (filename)
 }
 
 /* A thin wrapper around the real parser that initializes the 
-   integrated preprocessor after debug output has been initialized.  */
+   integrated preprocessor after debug output has been initialized.
+   Also, make sure the start_source_file debug hook gets called for
+   the primary source file.  */
 
 int
 yyparse()
 {
+  /* APPLE LOCAL begin PFE */
+#ifdef PFE
+  /* During a PFE load, we emit the SO stabs entry before we thaw
+     prefix header stabs info.  */
+  if (pfe_operation != PFE_LOAD)
+#endif
+  /* APPLE LOCAL end PFE */
+  (*debug_hooks->start_source_file) (lineno, input_filename);
   cpp_finish_options (parse_in);
 
+  /* APPLE LOCAL begin PFE validation dpatel */
+#ifdef PFE
+  /* Check command line macros, which were defined (and undefined)
+     when the PFE was built, are consistent with current macro
+     definitions.  */
+     if (pfe_macro_validation && pfe_operation == PFE_LOAD)
+       pfe_check_cmd_ln_macros ();
+#endif
+  /* APPLE LOCAL end PFE validation dpatel */
   return yyparse_1();
 }
 
@@ -242,7 +262,7 @@ cb_ident (pfile, line, str)
   if (! flag_no_ident)
     {
       /* Convert escapes in the string.  */
-      tree value = lex_string ((const char *)str->text, str->len, 0);
+      tree value = lex_string (str->text, str->len, 0);
       ASM_OUTPUT_IDENT (asm_out_file, TREE_STRING_POINTER (value));
     }
 #endif
@@ -274,10 +294,12 @@ cb_file_change (pfile, new_map)
 	main_input_filename = new_map->to_file;
       else
 	{
-	  lineno = SOURCE_LINE (new_map - 1, new_map->from_line - 1);
+          int included_at = SOURCE_LINE (new_map - 1, new_map->from_line - 1);
+
+	  lineno = included_at;
 	  push_srcloc (new_map->to_file, 1);
 	  input_file_stack->indent_level = indent_level;
-	  (*debug_hooks->start_source_file) (lineno, new_map->to_file);
+	  (*debug_hooks->start_source_file) (included_at, new_map->to_file);
 #ifndef NO_IMPLICIT_EXTERN_C
 	  if (c_header_level)
 	    ++c_header_level;
@@ -313,6 +335,10 @@ cb_file_change (pfile, new_map)
       
       (*debug_hooks->end_source_file) (to_line);
     }
+  /* APPLE LOCAL begin indexing dpatel */
+  else if (flag_gen_index && new_map->reason == LC_RENAME)
+    add_dup_header_name (input_filename, new_map->to_file);
+  /* APPLE LOCAL end indexing dpatel */
 
   update_header_times (new_map->to_file);
   in_system_header = new_map->sysp != 0;
@@ -811,8 +837,8 @@ c_lex (value)
 
     case CPP_STRING:
     case CPP_WSTRING:
-      *value = lex_string ((const char *)tok->val.str.text,
-			   tok->val.str.len, tok->type == CPP_WSTRING);
+      *value = lex_string (tok->val.str.text, tok->val.str.len,
+			   tok->type == CPP_WSTRING);
       break;
 
       /* These tokens should not be visible outside cpplib.  */
@@ -1301,14 +1327,14 @@ lex_number (str, len)
 
 static tree
 lex_string (str, len, wide)
-     const char *str;
+     const unsigned char *str;
      unsigned int len;
      int wide;
 {
   tree value;
   char *buf = alloca ((len + 1) * (wide ? WCHAR_BYTES : 1));
   char *q = buf;
-  const char *p = str, *limit = str + len;
+  const unsigned char *p = str, *limit = str + len;
   unsigned int c;
   unsigned width = wide ? WCHAR_TYPE_SIZE
 			: TYPE_PRECISION (char_type_node);
@@ -1327,7 +1353,7 @@ lex_string (str, len, wide)
       wchar_t wc;
       int char_len;
 
-      char_len = local_mbtowc (&wc, p, limit - p);
+      char_len = local_mbtowc (&wc, (const char *) p, limit - p);
       if (char_len == -1)
 	{
 	  warning ("ignoring invalid multibyte character");
@@ -1356,14 +1382,13 @@ lex_string (str, len, wide)
 	    mask = ~0;
 
           /* APPLE LOCAL begin Pascal Strings 2001-07-05 zll */
-	  if(flag_pascal_strings && *p == 'p')
+	  if (flag_pascal_strings && *p == 'p')
 	    {
 	      is_pascal_escape = 1;
 	      p++;
 	    }
 	  else
-	    c = cpp_parse_escape (parse_in, (const unsigned char **) &p,
-				  (const unsigned char *) limit,
+	    c = cpp_parse_escape (parse_in, &p, limit,
 				  mask, flag_traditional);
           /* APPLE LOCAL end Pascal Strings 2001-07-05 zll */
 	}
